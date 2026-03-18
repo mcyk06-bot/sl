@@ -10,24 +10,35 @@
 *{margin:0;padding:0}
 body{background:#000;overflow:hidden;touch-action:none;-webkit-user-select:none;user-select:none}
 canvas{display:block;image-rendering:pixelated;image-rendering:-webkit-optimize-contrast;image-rendering:crisp-edges}
+
+#dbg{position:fixed;top:0;left:0;width:100%;background:rgba(200,0,0,0.9);color:#fff;font:11px monospace;padding:4px;z-index:9999;display:none;word-break:break-all;}
 </style>
+
 </head>
 <body>
+<div id="dbg"></div>
 <canvas id="c"></canvas>
 <script>
+
+window.onerror = function(msg, src, line, col, err) {
+var d = document.getElementById(‘dbg’);
+if(d){ d.style.display=‘block’; d.textContent = ‘ERROR L’+line+’: ’+msg; }
+return false;
+};
+
 // ═══════════════════════════════════════════════════════════════
 // SLIME SURVIVORS — clean rewrite
 // ═══════════════════════════════════════════════════════════════
-const C = document.getElementById('c');
-const ctx = C.getContext('2d');
+const C = document.getElementById(‘c’);
+const ctx = C.getContext(‘2d’);
 let W, H;
 function resize() {
-  const sw = window.innerWidth || document.documentElement.clientWidth || 375;
-  const sh = window.innerHeight || document.documentElement.clientHeight || 667;
-  W = C.width = Math.min(sw, 430);
-  H = C.height = sh;
+const sw = window.innerWidth || document.documentElement.clientWidth || 375;
+const sh = window.innerHeight || document.documentElement.clientHeight || 667;
+W = C.width = Math.min(sw, 430);
+H = C.height = sh;
 }
-window.addEventListener('resize', resize);
+window.addEventListener(‘resize’, resize);
 
 // ── ワールドサイズ & カメラ ──────────────────────────────────────
 const WW = 2400, WH = 2400;
@@ -1858,7 +1869,6 @@ ctx.textAlign = ‘left’;
 let lastTs = 0;
 function loop(ts) {
 requestAnimationFrame(loop);
-try {
 const dt = Math.min((ts - lastTs) / 1000, 0.05); lastTs = ts; gTime += dt;
 ctx.clearRect(0, 0, C.width, C.height);
 
@@ -1936,7 +1946,6 @@ if (state === ‘levelup’) { drawHUD(); drawLevelUp(); }
 if (state === ‘boss_warning’) drawBossWarning();
 if (state === ‘jesus_clear’) drawClear();
 if (state === ‘stage_clear’) drawStageClear();
-} catch(e) { console.error(‘loop error:’, e); }
 }
 
 // ═══════════════════════════════════════════════════════════════
