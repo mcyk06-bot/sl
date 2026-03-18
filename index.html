@@ -29,6 +29,26 @@ return false;
 // ═══════════════════════════════════════════════════════════════
 // SLIME SURVIVORS — clean rewrite
 // ═══════════════════════════════════════════════════════════════
+
+// ══ 診断コード ══
+(function(){
+try {
+var tc = document.getElementById(‘c’);
+if(!tc){ document.body.innerHTML=’<p style="color:red;font-size:20px">canvas NOT FOUND</p>’; return; }
+tc.width = 300; tc.height = 100;
+var tx = tc.getContext(‘2d’);
+if(!tx){ document.body.innerHTML=’<p style="color:red;font-size:20px">getContext FAILED</p>’; return; }
+tx.fillStyle=’#ff0000’;
+tx.fillRect(0,0,300,100);
+tx.fillStyle=’#ffffff’;
+tx.font=‘20px monospace’;
+tx.fillText(‘JS OK - loading…’, 10, 50);
+// 2秒後に消える（ゲームが上書きするので）
+} catch(e) {
+document.body.innerHTML=’<p style="color:red;font-size:16px">DIAG ERROR: ‘+e.message+’</p>’;
+}
+})();
+
 const C = document.getElementById(‘c’);
 const ctx = C.getContext(‘2d’);
 let W, H;
