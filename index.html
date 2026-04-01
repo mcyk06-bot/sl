@@ -582,23 +582,36 @@ class Player {
       }
     }
     // XP
-    const vr = 52 + (player.level - 1) * 4;
+    const vr = 52 + (player.level - 1) * 4; // 吸引開始距離
+    const collectDist = 10; // ★ここを小さく修正（10px以内まで近づいたら吸収）
+
     for (let i = xpOrbs.length - 1; i >= 0; i--) {
       const o = xpOrbs[i];
-      const dx = this.x - o.x, dy = this.y - o.y;
+      const dx = this.x - o.x;
+      const dy = (this.y - 10) - o.y; // ★プレイヤーの中心（少し上）を目指す
       const d2 = dx * dx + dy * dy;
-      if (d2 < vr * vr * 4) {
-        const d = Math.sqrt(d2) || 1;
+      const d = Math.sqrt(d2) || 1;
+
+      // 1. 吸引ロジック
+      if (d < vr * 2) {
         const pull = 1 - d / (vr * 2);
-        const spd = 100 + pull * pull * 350;
-        o.vx += (dx / d * spd - o.vx) * Math.min(1, dt * 7 * pull + dt * 2.5);
-        o.vy += (dy / d * spd - o.vy) * Math.min(1, dt * 7 * pull + dt * 2.5);
+        const spd = 150 + pull * pull * 450; // スピードを少しアップ
+        o.vx += (dx / d * spd - o.vx) * Math.min(1, dt * 10 * pull + dt * 3);
+        o.vy += (dy / d * spd - o.vy) * Math.min(1, dt * 10 * pull + dt * 3);
       }
-      if (d2 < vr * vr && o.spawnT <= 0) {
-        this.xp += o.val; xpOrbs.splice(i, 1);
-        while (this.xp >= this.xpN) {
-          this.xp -= this.xpN; this.xpN = Math.floor(this.xpN * 1.32 + 4);
-          this.level++; doLevelUp(); return;
+
+      // 2. 吸収判定（実際に消えてXP加算される距離）
+      if (d < collectDist && o.spawnT <= 0) {
+        this.xp += o.val;
+        xpOrbs.splice(i, 1);
+        
+        // レベルアップ判定
+        if (this.xp >= this.xpN) {
+          this.xp -= this.xpN;
+          this.xpN = Math.floor(this.xpN * 1.32 + 4);
+          this.level++;
+          doLevelUp();
+          return; // レベルアップ画面へ移行するため抜ける
         }
       }
     }
