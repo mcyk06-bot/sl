@@ -13,9 +13,18 @@ canvas{display:block;image-rendering:pixelated;image-rendering:-webkit-optimize-
 </style>
 </head>
 <body>
+  <svg xmlns="http://www.w3.org/2000/svg" version="1.1" style="display:none;">
+  <defs>
+    <filter id="goo">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur" />
+      <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9" result="goo" />
+      <feComposite in="SourceGraphic" in2="goo" operator="atop"/>
+    </filter>
+  </defs>
+</svg>
+
 <canvas id="c"></canvas>
 <script>
-
 // ===============================================================
 // SLIME SURVIVORS - clean rewrite
 // ===============================================================
@@ -23,12 +32,16 @@ canvas{display:block;image-rendering:pixelated;image-rendering:-webkit-optimize-
 const C = document.getElementById('c');
 const ctx = C.getContext('2d');
 let W, H;
+const sC = document.createElement('canvas');
+const sCtx = sC.getContext('2d');
 function resize() {
   const sw = window.innerWidth || document.documentElement.clientWidth || 375;
   const sh = window.innerHeight || document.documentElement.clientHeight || 667;
   // ゲーム内部解像度（モバイルサイズ固定）
   W = C.width = Math.min(sw, 430);
   H = C.height = Math.min(sh, 932);
+  sC.width = W;
+  sC.height = H;
   // PC: CSSスケールで画面全体にフィット
   const scaleX = window.innerWidth / W;
   const scaleY = window.innerHeight / H;
@@ -136,6 +149,8 @@ C.addEventListener('click', e => {
 let _sid = 0;
 class Slime {
   constructor(x, y, r, pi) {
+    this.shx = 0; // 衝撃による横方向の歪み (Shear X)
+    this.shy = 0; // 衝撃による縦方向の歪み (Shear Y)
     this.id = _sid++;
     this.x = x; this.y = y;
     this.vx = 0; this.vy = 0;
@@ -197,18 +212,18 @@ class Slime {
   }
 
   // 
-  drawPath(pts) {
+  drawPath(pts, tCtx = ctx) {
     const n = pts.length;
-    ctx.beginPath();
+    tCtx.beginPath();
     for (let i = 0; i < n; i++) {
       const c = pts[i], nx = pts[(i + 1) % n];
       const mx = (c.x + nx.x) * 0.5, my = (c.y + nx.y) * 0.5;
-      if (i === 0) ctx.moveTo(mx, my);
-      else ctx.quadraticCurveTo(c.x, c.y, mx, my);
+      if (i === 0) tCtx.moveTo(mx, my);
+      else tCtx.quadraticCurveTo(c.x, c.y, mx, my);
     }
     const lx = (pts[n - 1].x + pts[0].x) * 0.5, ly = (pts[n - 1].y + pts[0].y) * 0.5;
-    ctx.quadraticCurveTo(pts[n - 1].x, pts[n - 1].y, lx, ly);
-    ctx.closePath();
+    tCtx.quadraticCurveTo(pts[n - 1].x, pts[n - 1].y, lx, ly);
+    tCtx.closePath();
   }
 
   update(dt) {
@@ -234,12 +249,12 @@ class Slime {
     const k = mv > 5 ? Math.min(1, dt * 12) : Math.min(1, dt * 7);
     this.sqStr += (strT - this.sqStr) * k;
     this.sqSq += (sqT - this.sqSq) * k;
-    if (mv > 8) {
-      let da = angT - this.sqAng;
-      while (da > Math.PI) da -= Math.PI * 2;
-      while (da < -Math.PI) da += Math.PI * 2;
-      this.sqAng += da * Math.min(1, dt * 14);
-    }
+    //if (mv > 8) {
+    //  let da = angT - this.sqAng;
+    //  while (da > Math.PI) da -= Math.PI * 2;
+    //  while (da < -Math.PI) da += Math.PI * 2;
+    //  this.sqAng += da * Math.min(1, dt * 14);
+    //}
 
     // 
     this.blinkT -= dt;
@@ -282,7 +297,14 @@ class Slime {
   }
 
   hit(dmg) {
-    this.hp -= dmg; this.flashT = 0.08;
+    this.hp -= dmg; 
+    this.flashT = 0.08;
+    
+    // 回転(this.va)への代入を廃止し、歪み(shx, shy)に衝撃を与える
+    // 左右にランダムに揺れつつ、上にグニャッと伸びる
+    this.shx = (Math.random() - 0.5) * 25; 
+    this.shy = -20; 
+
     splat(this.x, this.y - this.radius * 0.3, SLIME_PAL[this.pi].m, 3, 22);
     if (this.hp <= 0) this.die();
   }
@@ -318,74 +340,87 @@ class Slime {
     }
   }
 
-  draw(t) {
+  draw(t, tCtx = ctx, drawMode = 0) {
     if (this.sc < 0.03) return;
     const pal = SLIME_PAL[this.pi];
     const sr = this.radius * this.sc;
     const pts = this.blobPts(t);
 
-    // 
-    ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    ctx.beginPath();
-    ctx.ellipse(this.x + 3, this.y + sr * 0.75, sr * 0.9, sr * 0.28, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // -- ----------------------
-    if (this.flashT > 0) {
-      this.drawPath(pts);
-      ctx.fillStyle = '#ffffff'; ctx.fill();
-    } else {
-      // 
-      this.drawPath(pts);
-      ctx.fillStyle = pal.m; ctx.fill();
-
-      // 
-      this.drawPath(pts);
-      ctx.strokeStyle = pal.d;
-      ctx.lineWidth = sr * 0.32;
-      ctx.globalAlpha = 0.6;
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-
-      // 
-      // h
-      ctx.save();
-      ctx.translate(this.x, this.y);
-      ctx.scale(0.62, 0.58);
-      ctx.translate(-this.x, -this.y + sr * 0.08);
-      this.drawPath(pts);
-      ctx.fillStyle = pal.h;
-      ctx.globalAlpha = 0.35;
-      ctx.fill();
-      ctx.restore();
-      ctx.globalAlpha = 1;
-
-      // 
-      ctx.fillStyle = 'rgba(255,255,255,0.88)';
-      ctx.beginPath();
-      ctx.arc(this.x - sr * 0.26, this.y - sr * 0.30, sr * 0.10, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(255,255,255,0.42)';
-      ctx.beginPath();
-      ctx.arc(this.x - sr * 0.08, this.y - sr * 0.44, sr * 0.05, 0, Math.PI * 2);
-      ctx.fill();
+    // [本体描画] 全部モード または 本体のみモード
+    if (drawMode === 0 || drawMode === 1) {
+      tCtx.save();
+      if (this.flashT > 0) {
+        this.drawPath(pts, tCtx);
+        tCtx.fillStyle = '#ffffff'; tCtx.fill();
+      } else {
+        this.drawPath(pts, tCtx);
+        tCtx.fillStyle = pal.m; tCtx.fill();
+      }
+      tCtx.restore();
     }
 
-    // 
-    if (this.flashT <= 0 && sr > 9) this.drawEyes(sr);
+    // 本体のみモードの場合はここで終了
+    if (drawMode === 1) return;
 
-    // HP
+    // --- 既存の描画ロジック（影、枠線、ハイライト、目など） ---
+    tCtx.save();
+    tCtx.fillStyle = 'rgba(0,0,0,0.22)';
+    tCtx.beginPath();
+    tCtx.ellipse(this.x + 3, this.y + sr * 0.75, sr * 0.9, sr * 0.28, 0, 0, Math.PI * 2);
+    tCtx.fill();
+    tCtx.restore();
+
+    if (this.flashT > 0) {
+      // 下地が白いのでここでは何もしない
+    } else {
+      this.drawPath(pts, tCtx);
+      tCtx.strokeStyle = pal.d;
+      tCtx.lineWidth = sr * 0.32;
+      tCtx.globalAlpha = 0.6;
+      tCtx.stroke();
+      tCtx.globalAlpha = 1;
+
+      tCtx.save();
+      tCtx.translate(this.x, this.y);
+      tCtx.scale(0.62, 0.58);
+      tCtx.translate(-this.x, -this.y + sr * 0.08);
+      this.drawPath(pts, tCtx);
+      tCtx.fillStyle = pal.h;
+      tCtx.globalAlpha = 0.35;
+      tCtx.fill();
+      tCtx.restore();
+      tCtx.globalAlpha = 1;
+
+      // --- 修正：ネバネバしたテカリ（動くハイライト） ---
+      const shimmerT = t * 0.005; 
+      const ox = Math.sin(shimmerT + this.x * 0.05) * (sr * 0.08); 
+      const oy = Math.cos(shimmerT + this.y * 0.05) * (sr * 0.08); 
+
+      tCtx.fillStyle = 'rgba(255,255,255,0.88)';
+      tCtx.beginPath();
+      // 元の座標計算に ox と oy を加算
+      tCtx.arc(this.x - sr * 0.26 + ox, this.y - sr * 0.30 + oy, sr * 0.10, 0, Math.PI * 2);
+      tCtx.fill();
+
+      tCtx.fillStyle = 'rgba(255,255,255,0.42)';
+      tCtx.beginPath();
+      // こちらも同様に加算（動きを少し抑えるために 0.5倍）
+      tCtx.arc(this.x - sr * 0.08 + ox * 0.5, this.y - sr * 0.44 + oy * 0.5, sr * 0.05, 0, Math.PI * 2);
+      tCtx.fill();
+      // ----------------------------------------------
+    }
+
+    if (this.flashT <= 0 && sr > 9) this.drawEyes(sr, tCtx);
+
     if (this.hp < this.maxHp && sr > 12) {
       const bw = sr * 1.6, bh = 3;
       const bx = this.x - bw / 2, by = this.y - sr * 1.35 - 6;
-      ctx.fillStyle = PAL.hpBg; ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
-      ctx.fillStyle = PAL.hp; ctx.fillRect(bx, by, bw * (this.hp / this.maxHp), bh);
+      tCtx.fillStyle = PAL.hpBg; tCtx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
+      tCtx.fillStyle = PAL.hp; tCtx.fillRect(bx, by, bw * (this.hp / this.maxHp), bh);
     }
   }
 
-  drawEyes(sr) {
+  drawEyes(sr, tCtx = ctx) {
     const er = Math.max(2, sr * 0.18), sep = sr * 0.30;
     const fx = this.x + Math.cos(this.eyeA) * sr * 0.34;
     const fy = this.y + Math.sin(this.eyeA) * sr * 0.34;
@@ -395,21 +430,21 @@ class Slime {
     if (sr > 40) eyes.push({ x: fx, y: fy + sr * 0.22 });
     const blink = this.blinkPh === 'blink';
     for (const e of eyes) {
-      ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      if (blink) ctx.ellipse(e.x, e.y, er, er * 0.1, 0, 0, Math.PI * 2);
-      else ctx.arc(e.x, e.y, er, 0, Math.PI * 2);
-      ctx.fill();
+      tCtx.fillStyle = '#fff';
+      tCtx.beginPath();
+      if (blink) tCtx.ellipse(e.x, e.y, er, er * 0.1, 0, 0, Math.PI * 2);
+      else tCtx.arc(e.x, e.y, er, 0, Math.PI * 2);
+      tCtx.fill();
       if (!blink) {
         const po = er * 0.25;
-        ctx.fillStyle = '#0a0a14';
-        ctx.beginPath();
-        ctx.arc(e.x + Math.cos(this.eyeA) * po, e.y + Math.sin(this.eyeA) * po, er * 0.55, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#fff';
-        ctx.beginPath();
-        ctx.arc(e.x + Math.cos(this.eyeA) * po - er * 0.15, e.y + Math.sin(this.eyeA) * po - er * 0.15, er * 0.2, 0, Math.PI * 2);
-        ctx.fill();
+        tCtx.fillStyle = '#0a0a14';
+        tCtx.beginPath();
+        tCtx.arc(e.x + Math.cos(this.eyeA) * po, e.y + Math.sin(this.eyeA) * po, er * 0.55, 0, Math.PI * 2);
+        tCtx.fill();
+        tCtx.fillStyle = '#fff';
+        tCtx.beginPath();
+        tCtx.arc(e.x + Math.cos(this.eyeA) * po - er * 0.15, e.y + Math.sin(this.eyeA) * po - er * 0.15, er * 0.2, 0, Math.PI * 2);
+        tCtx.fill();
       }
     }
   }
@@ -473,6 +508,10 @@ function mergeSlimes() {
 // ===============================================================
 // PLAYER
 // ===============================================================
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.code] = true; });
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
 class Player {
   constructor() {
     this.x = WW / 2; this.y = WH / 2;
@@ -489,8 +528,24 @@ class Player {
   }
   isJesus() { return this.jesusT > 0; }
   update(dt) {
+    // 元々のジョイスティック入力
+    let mdx = joy.dx;
+    let mdy = joy.dy;
+
+    // --- ここを追加：キーボード（WASDと矢印キー）の入力を加算 ---
+    if (keys['KeyW'] || keys['ArrowUp'])    mdy -= 1;
+    if (keys['KeyS'] || keys['ArrowDown'])  mdy += 1;
+    if (keys['KeyA'] || keys['ArrowLeft'])  mdx -= 1;
+    if (keys['KeyD'] || keys['ArrowRight']) mdx += 1;
+
+    // 斜め移動で移動速度が上がらないように調整
+    if (mdx !== 0 || mdy !== 0) {
+      const len = Math.sqrt(mdx * mdx + mdy * mdy);
+      mdx /= len; 
+      mdy /= len;
+    }
+    // --------------------------------------------------
     // 
-    const mdx = joy.dx, mdy = joy.dy;
     this.x = Math.max(20, Math.min(WW - 20, this.x + mdx * this.speed * dt));
     this.y = Math.max(20, Math.min(WH - 20, this.y + mdy * this.speed * dt));
     if (Math.abs(mdx) > 0.1) this.facing = mdx > 0 ? 1 : -1;
@@ -1066,15 +1121,30 @@ class Boss {
     this.blinkPh='wait'; this.blinkT=1.5+Math.random()*2;
   }
   blobPts(t) {
-    return this.pts.map((p,i)=>{
-      const a=(i/this.N)*Math.PI*2+p.aOff;
-      const r=this.radius*this.sc*p.rBase*(1+Math.sin(t*p.fr+p.ph)*p.am);
-      const ca=Math.cos(this.sqAng),sa=Math.sin(this.sqAng);
-      const px=Math.cos(a)*r,py=Math.sin(a)*r;
-      const al=px*ca+py*sa,pe=-px*sa+py*ca;
-      return{x:this.x+al*this.sqStr*ca-pe*this.sqSq*sa,
-             y:this.y+al*this.sqStr*sa+pe*this.sqSq*ca};
-    });
+    const pts = [];
+    const num = 8;
+    const sr = this.radius * this.sc;
+    
+    // 歪みの減衰（バネのように戻る）
+    this.shx *= 0.8;
+    this.shy *= 0.8;
+
+    for (let i = 0; i < num; i++) {
+      const a = (i / num) * Math.PI * 2;
+      let r = sr + Math.sin(t * 0.01 + i) * (sr * 0.05);
+      
+      let px = Math.cos(a) * r;
+      let py = Math.sin(a) * r;
+
+      // ネバネバ変形の計算
+      // 頭頂部（pyがマイナス）ほど大きく動き、底部（pyがプラス）は動かない
+      const weight = Math.max(0, (sr - py) / (sr * 2)); 
+      px += this.shx * weight;
+      py += this.shy * weight;
+
+      pts.push({ x: this.x + px, y: this.y + py });
+    }
+    return pts;
   }
   drawPath(pts) {
     const n=pts.length; ctx.beginPath();
@@ -1923,7 +1993,6 @@ function loop(ts) {
   }
 
   // -- DRAW ----------------------------------------------------
-  // 
   if(screenShake.t>0){screenShake.t-=dt;const d=screenShake.t/0.08;screenShake.x=(Math.random()-0.5)*3*d;screenShake.y=(Math.random()-0.5)*3*d;}else{screenShake.x=0;screenShake.y=0;}
   ctx.save(); ctx.translate(-cam.x+screenShake.x, -cam.y+screenShake.y);
   drawBg();
@@ -1936,9 +2005,31 @@ function loop(ts) {
   drawSlimeBullets();
   for(const b of bosses)b.draw(gTime);
   if(satan)satan.draw(gTime);
-  // 
-  drawNecks(gTime);
-  for (const sl of slimes) sl.draw(gTime);
+  
+  // ==== 変更箇所: オフスクリーン＋Gooフィルターで流体を表現 ====
+  // 古いベジェ描画は不要になったためコメントアウト（機能維持のため関数は残します）
+  // drawNecks(gTime);
+  
+  // 1. オフスクリーンをクリアし、カメラ位置を合わせる
+  sCtx.clearRect(0, 0, W, H);
+  sCtx.save();
+  sCtx.translate(-cam.x + screenShake.x, -cam.y + screenShake.y);
+
+  // 2. スライムの「下地（色部分）」だけをオフスクリーンに描画
+  for (const sl of slimes) sl.draw(gTime, sCtx, 1);
+  sCtx.restore();
+
+  // 3. Gooフィルターをかけてメイン画面へ一括転写
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0); // 転写時はカメラのズレをリセット
+  ctx.filter = 'blur(8px) contrast(180%)';
+  ctx.drawImage(sC, 0, 0);
+  ctx.restore();
+
+  // 4. スライムの「目やハイライト」をメイン画面に直接上書き描画
+  for (const sl of slimes) sl.draw(gTime, ctx, 2);
+  // ==============================================================
+
   drawParticles();
   if (player) player.draw();
   ctx.restore();
