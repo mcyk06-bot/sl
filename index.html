@@ -240,6 +240,38 @@ class Slime {
     this.x += this.vx * dt; this.y += this.vy * dt;
     this.vx *= Math.pow(0.55, dt); this.vy *= Math.pow(0.55, dt);
 
+  // --- 違う色のスライム同士の重なり防止 ---
+  for (let other of slimes) {
+    if (other === this || other.dead || other.sc < 0.5) continue;
+
+    // 同じ色の場合は融合を許可するため、チェックをスキップ
+    if (other.pi === this.pi) continue;
+
+    const dx = other.x - this.x;
+    const dy = other.y - this.y;
+    const distSq = dx * dx + dy * dy;
+    const minDist = (this.radius + other.radius) * 0.9; // わずかに重なりを許容すると自然です
+
+    if (distSq < minDist * minDist) {
+      const dist = Math.sqrt(distSq) || 1;
+      const overlap = minDist - dist;
+      
+      // 押し出す方向のベクトル
+      const nx = dx / dist;
+      const ny = dy / dist;
+
+      // 互いに外側へ押し出す力を速度に加える（反発係数 0.2 程度）
+      const pushForce = overlap * 0.2;
+      this.vx -= nx * pushForce;
+      this.vy -= ny * pushForce;
+      
+      // 位置も直接補正して重なりを即座に解消する
+      this.x -= nx * overlap * 0.5;
+      this.y -= ny * overlap * 0.5;
+    }
+  }
+  // --------------------------------------
+
     // &
     const mv = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
     const ratio = Math.min(1, mv / (sp || 1));
