@@ -165,7 +165,7 @@ class Slime {
     this.pi = (pi !== undefined && pi !== null) ? pi : Math.floor(Math.random() * 3);
     this.hp = r * 3 + waveNum * 6 + cycleNum * 22;
     this.maxHp = this.hp;
-    this.xpV = Math.max(2, Math.round(r * 0.7));
+    this.xpV = Math.max(2, Math.round(r * r * 0.08 + r * 0.5)); // 半径が大きいほど指数的に増加
     this.dead = false;
     this.sc = 0; // spawn scale 01
     this.flashT = 0;
@@ -352,10 +352,10 @@ class Slime {
     this.dead = true;
     score += Math.round(this.radius * 0.5);
     const pal = SLIME_PAL[this.pi];
-    // XP
-    const n = Math.max(1, Math.floor(this.xpV / 3));
+    // XP：半径が大きいほどオーブ数も増える
+    const n = Math.max(1, Math.round(this.radius * 0.25));
     for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2, r = Math.random() * this.radius * 0.4;
+      const a = Math.random() * Math.PI * 2, r = Math.random() * this.radius * 0.6;
       xpOrbs.push(new XPOrb(this.x + Math.cos(a) * r, this.y + Math.sin(a) * r, Math.ceil(this.xpV / n)));
     }
     // 
