@@ -54,11 +54,23 @@ window.addEventListener('resize', resize);
 
 // --  &  --------------------------------------
 const WW = 2400, WH = 2400;
-const cam = { x: 0, y: 0 };
+const cam = { x: 0, y: 0, zoom: 1.0, targetZoom: 1.0 };
 function camUpdate() {
   if (!player) return;
-  cam.x = Math.max(0, Math.min(WW - W, player.x - W / 2));
-  cam.y = Math.max(0, Math.min(WH - H, player.y - H / 2));
+  // 敵の最大サイズと剣の到達距離を基準にズームを計算
+  let maxR = 40 + cycleNum * 15;
+  for (const sl of slimes) if (!sl.dead) maxR = Math.max(maxR, sl.radius * sl.sc);
+  for (const b of bosses) if (!b.dead) maxR = Math.max(maxR, b.radius * b.sc);
+  if (satan && !satan.dead) maxR = Math.max(maxR, satan.radius * satan.sc);
+  const swordReach = 32 + (player ? player.sLen : 42);
+  const refSize = Math.max(maxR, swordReach * 0.55);
+  // refSizeが大きいほどズームアウト、サイクルが増えるほど遠い
+  cam.targetZoom = Math.max(0.14, Math.min(1.0, 58 / refSize * Math.pow(0.80, cycleNum)));
+  cam.zoom += (cam.targetZoom - cam.zoom) * 0.025;
+  // カメラ位置（ズーム考慮した可視範囲の左上）
+  const vw = W / cam.zoom, vh = H / cam.zoom;
+  cam.x = Math.max(0, Math.min(currentWW - vw, player.x - vw / 2));
+  cam.y = Math.max(0, Math.min(currentWH - vh, player.y - vh / 2));
 }
 
 // --  ----------------------------------------------------
@@ -80,8 +92,10 @@ const PAL = {
 };
 
 // --  ----------------------------------------------
-let state = 'title'; // title / play / levelup / jesus_clear / gameover
+let state = 'title'; // title / play / levelup / gameover / boss_warning
 let gTime = 0, waveNum = 1, score = 0, wavePending = false;
+let cycleNum = 0; // インフレサイクル数（増えるほど強くなる）
+let currentWW = 2400, currentWH = 2400; // 動的に拡張するワールドサイズ
 let player, slimes = [], xpOrbs = [], particles = [], magicParts = [];
 let items = [], shrines = [], slimeBullets = [], bosses = [];
 let bossKills = 0; // 
@@ -156,7 +170,7 @@ class Slime {
     this.vx = 0; this.vy = 0;
     this.radius = r;
     this.pi = (pi !== undefined && pi !== null) ? pi : Math.floor(Math.random() * 3);
-    this.hp = r * 3 + waveNum * 6;
+    this.hp = r * 3 + waveNum * 6 + cycleNum * 22;
     this.maxHp = this.hp;
     this.xpV = Math.max(2, Math.round(r * 0.7));
     this.dead = false;
@@ -187,7 +201,7 @@ class Slime {
   }
 
   spd() {
-    return 28 + (60 - Math.min(60, this.radius)) * 0.4 + waveNum * 2.2;
+    return 28 + (60 - Math.min(60, this.radius)) * 0.4 + waveNum * 2.2 + cycleNum * 9;
   }
 
   // 
@@ -525,7 +539,7 @@ function mergeSlimes() {
       if (dx * dx + dy * dy < (a.radius + b.radius) * (a.radius + b.radius) * 0.5) {
         const big = a.radius >= b.radius ? a : b;
         const small = a.radius >= b.radius ? b : a;
-        const nr = Math.min(120, Math.sqrt(big.radius * big.radius + small.radius * small.radius * 0.65));
+        const nr = Math.min(120 + cycleNum * 35, Math.sqrt(big.radius * big.radius + small.radius * small.radius * 0.65));
         big.x = (big.x * big.radius + small.x * small.radius) / (big.radius + small.radius);
         big.y = (big.y * big.radius + small.y * small.radius) / (big.radius + small.radius);
         big.radius = nr; big.hp += small.hp * 0.6; big.maxHp += small.maxHp * 0.6;
@@ -578,8 +592,8 @@ class Player {
     }
     // --------------------------------------------------
     // 
-    this.x = Math.max(20, Math.min(WW - 20, this.x + mdx * this.speed * dt));
-    this.y = Math.max(20, Math.min(WH - 20, this.y + mdy * this.speed * dt));
+    this.x = Math.max(20, Math.min(currentWW - 20, this.x + mdx * this.speed * dt));
+    this.y = Math.max(20, Math.min(currentWH - 20, this.y + mdy * this.speed * dt));
     if (Math.abs(mdx) > 0.1) this.facing = mdx > 0 ? 1 : -1;
     if (Math.abs(mdx) > 0.1 || Math.abs(mdy) > 0.1) {
       this.wt += dt; if (this.wt > 0.16) { this.wt = 0; this.wf ^= 1; }
@@ -1140,7 +1154,7 @@ class Boss {
     const def = BOSS_DEFS[bossKills % 6];
     this.def = def;
     this.displayName = def.name + 'スライム';
-    const scale = 1 + bossKills * 0.22; // 
+    const scale = 1 + bossKills * 0.22 + cycleNum * 0.55; // サイクルでスケールアップ
     this.radius = def.size * (0.9 + Math.random()*0.2);
     this.hp = this.radius * 22 * scale;
     this.maxHp = this.hp;
@@ -1269,8 +1283,8 @@ class Boss {
     for(let i=0;i<20;i++){const a=Math.random()*Math.PI*2,r=Math.random()*this.radius*.5;xpOrbs.push(new XPOrb(this.x+Math.cos(a)*r,this.y+Math.sin(a)*r,8));}
     for(let i=0;i<18;i++){const a=Math.random()*Math.PI*2,s=30+Math.random()*100;particles.push({x:this.x,y:this.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-20,r:4+Math.random()*7,c:this.def.color,life:.8+Math.random()*.8,ml:1.6});}
     if(this.shrine)this.shrine.onBossDefeated();
-    // 
-    waveNum+=2;
+    // ボス撃破でウェーブ加速
+    waveNum += 2 + cycleNum;
   }
   draw(t){
     if(this.sc<.03)return;
@@ -1345,14 +1359,14 @@ class SatanSlime {
   constructor(x, y) {
     this.x = x; this.y = y;
     this.vx = 0; this.vy = 0;
-    this.radius = 120;
-    this.hp = (stageNum === 2 ? 8000 : 4000) + bossKills * 500;
+    this.radius = 120 + cycleNum * 35;
+    this.hp = 4000 + cycleNum * 7000 + bossKills * 500;
     this.maxHp = this.hp;
     this.dead = false; this.sc = 0;
     this.flashT = 0; this.eyeA = 0;
     this.attackT = 2.5;
     this.phase = 0;
-    this.speed = 22;
+    this.speed = 22 + cycleNum * 5;
     this.blinkPh = 'wait'; this.blinkT = 2;
     this.N = 14;
     this.pts = [];
@@ -1433,10 +1447,10 @@ class SatanSlime {
   }
   die() {
     this.dead=true;
-    score+=10000;
-    for(let i=0;i<30;i++){const a=Math.random()*Math.PI*2,r=Math.random()*this.radius*.6;xpOrbs.push(new XPOrb(this.x+Math.cos(a)*r,this.y+Math.sin(a)*r,12));}
+    score += 10000 + cycleNum * 8000;
+    for(let i=0;i<30;i++){const a=Math.random()*Math.PI*2,r=Math.random()*this.radius*.6;xpOrbs.push(new XPOrb(this.x+Math.cos(a)*r,this.y+Math.sin(a)*r,12+cycleNum*5));}
     for(let i=0;i<25;i++){const a=Math.random()*Math.PI*2,s=40+Math.random()*140;particles.push({x:this.x,y:this.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-25,r:6+Math.random()*10,c:['#cc0033','#ff4400','#ff0066','#880033'][Math.floor(Math.random()*4)],life:1+Math.random(),ml:2});}
-    triggerClear();
+    startNextCycle();
   }
   draw(t) {
     if(this.sc<.02)return;
@@ -1554,11 +1568,12 @@ function drawSlimeBullets() {
 // BACKGROUND
 // ===============================================================
 function drawBg() {
-  ctx.fillStyle = PAL.bg; ctx.fillRect(cam.x, cam.y, W, H);
+  const vw = W / cam.zoom, vh = H / cam.zoom;
+  ctx.fillStyle = PAL.bg; ctx.fillRect(cam.x, cam.y, vw, vh);
   const tw = 48, th = 44;
   const sx = Math.floor(cam.x / tw) * tw, sy = Math.floor(cam.y / th) * th;
-  for (let x = sx; x <= cam.x + W + tw; x += tw) {
-    for (let y = sy; y <= cam.y + H + th; y += th) {
+  for (let x = sx; x <= cam.x + vw + tw; x += tw) {
+    for (let y = sy; y <= cam.y + vh + th; y += th) {
       const wx = Math.floor(x / tw), wy = Math.floor(y / th);
       const h = ((wx * 12347 + wy * 7919) * 2654435769) >>> 0;
       ctx.fillStyle = (h & 7) < 2 ? PAL.tile1 : PAL.tile2;
@@ -1574,17 +1589,17 @@ function drawBg() {
       }
     }
   }
-  // 
+  // プレイヤー周辺の光
   if (player) {
     const fl = 0.14 + Math.sin(gTime * 7.2) * 0.022 + Math.sin(gTime * 12.8) * 0.014;
-    const tg = ctx.createRadialGradient(player.x, player.y, 0.01, player.x, player.y, 200);
+    const tg = ctx.createRadialGradient(player.x, player.y, 0.01, player.x, player.y, 200 / cam.zoom);
     tg.addColorStop(0, `rgba(255,150,50,${fl})`); tg.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = tg; ctx.fillRect(cam.x, cam.y, W, H);
+    ctx.fillStyle = tg; ctx.fillRect(cam.x, cam.y, vw, vh);
   }
-  // 
-  const vg = ctx.createRadialGradient(player ? player.x : WW / 2, player ? player.y : WH / 2, H * 0.15, player ? player.x : WW / 2, player ? player.y : WH / 2, H * 0.72);
+  // ビネット
+  const vg = ctx.createRadialGradient(player ? player.x : currentWW / 2, player ? player.y : currentWH / 2, vh * 0.15, player ? player.x : currentWW / 2, player ? player.y : currentWH / 2, vh * 0.72);
   vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.55)');
-  ctx.fillStyle = vg; ctx.fillRect(cam.x, cam.y, W, H);
+  ctx.fillStyle = vg; ctx.fillRect(cam.x, cam.y, vw, vh);
 }
 
 // ===============================================================
@@ -1604,8 +1619,11 @@ function drawHUD() {
   ctx.strokeStyle = '#55cc00'; ctx.strokeRect(bx - 1, xy - 1, xw + 2, 10);
   ctx.fillStyle = '#fff'; ctx.font = 'bold 8px monospace'; ctx.fillText(`Lv.${player.level}`, bx + 4, xy + 7);
   ctx.fillStyle = PAL.wave; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'right';
-  ctx.fillText(`ST${stageNum} Wave ${waveNum}`, W - 8, 18); ctx.fillText(`${score}pt`, W - 8, 32);
-  ctx.fillStyle = PAL.dim; ctx.font = '8px monospace'; ctx.fillText(`[HEX] ${shrines.filter(s=>s.lit).length}/6`, W - 8, 46);
+  ctx.fillText(`CYC${cycleNum+1} Wave ${waveNum}`, W - 8, 18); ctx.fillText(`${score}pt`, W - 8, 32);
+  ctx.fillStyle = PAL.dim; ctx.font = '8px monospace'; ctx.fillText(`[HEX] ${shrines.filter(s=>s.hasBoss).length}/6`, W - 8, 46);
+  // ズームレベル表示
+  ctx.fillStyle = '#334433'; ctx.font = '7px monospace';
+  ctx.fillText(`zoom:${cam.zoom.toFixed(2)}`, W - 8, 56);
   ctx.textAlign = 'left';
   // 
   if (joy.on) {
@@ -1638,54 +1656,29 @@ function drawHUD() {
 }
 
 function drawMinimap() {
-  const mw = 80, mh = Math.round(mw * WH / WW), mx = W - mw - 8, my = 54;
-  const sx = x => mx + (x / WW) * mw, sy = y => my + (y / WH) * mh;
+  const mw = 80, mh = Math.round(mw * currentWH / currentWW), mx = W - mw - 8, my = 62;
+  const sx = x => mx + (x / currentWW) * mw, sy = y => my + (y / currentWH) * mh;
   ctx.save(); ctx.globalAlpha = 0.72;
   ctx.fillStyle = '#0a0806'; ctx.fillRect(mx - 1, my - 1, mw + 2, mh + 2);
   ctx.strokeStyle = '#443322'; ctx.lineWidth = 1; ctx.strokeRect(mx - 1, my - 1, mw + 2, mh + 2);
-  // 
+  // 祠
   for (const sh of shrines) {
     ctx.fillStyle = sh.hasBoss ? '#331144' : '#443355';
     ctx.beginPath(); ctx.arc(sx(sh.x), sy(sh.y), 2.5, 0, Math.PI * 2); ctx.fill();
   }
-  // 
+  // アイテム
   for (const it of items) {
     if (it.taken) continue;
     ctx.fillStyle = it.type === 'cross' ? '#ffe066' : it.type === 'chest' ? '#cc8822' : '#44aaff';
     ctx.fillRect(sx(it.x) - 1, sy(it.y) - 1, 2, 2);
   }
-  // 
+  // スライム
   ctx.fillStyle = '#44ff66';
   for (const sl of slimes) { ctx.beginPath(); ctx.arc(sx(sl.x), sy(sl.y), 1.4, 0, Math.PI * 2); ctx.fill(); }
-  // 
-  if (state === 'jesus_clear' || state === 'stage_clear') {
-    const prog2 = Math.min(1, clearTimer / 2);
-    ctx.save();
-    ctx.strokeStyle = `rgba(220,160,255,${prog2 * 0.95})`;
-    ctx.lineWidth = 1.2;
-    ctx.shadowColor = '#dd99ff'; ctx.shadowBlur = 4;
-    [[0,2,4,0],[1,3,5,1]].forEach(ord => {
-      ctx.beginPath();
-      ord.forEach((idx, i) => {
-        const s = shrines[idx];
-        if (i === 0) ctx.moveTo(sx(s.x), sy(s.y));
-        else ctx.lineTo(sx(s.x), sy(s.y));
-      });
-      ctx.stroke();
-    });
-    // 
-    if (prog2 > 0.6) {
-      const cg = ctx.createRadialGradient(mx+mw/2, my+mh/2, 0.01, mx+mw/2, my+mh/2, mw*0.4);
-      cg.addColorStop(0, `rgba(220,160,255,${(prog2-0.6)/0.4*0.4})`);
-      cg.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = cg; ctx.fillRect(mx, my, mw, mh);
-    }
-    ctx.restore();
-  }
-  // 
+  // ビューポート枠（ズーム対応）
   ctx.strokeStyle = 'rgba(255,220,100,0.3)'; ctx.lineWidth = 0.8;
-  ctx.strokeRect(sx(cam.x), sy(cam.y), mw * W / WW, mh * H / WH);
-  // 
+  ctx.strokeRect(sx(cam.x), sy(cam.y), mw * (W/cam.zoom) / currentWW, mh * (H/cam.zoom) / currentWH);
+  // プレイヤー
   if (player) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(sx(player.x), sy(player.y), 2.2, 0, Math.PI * 2); ctx.fill(); }
   ctx.restore();
 }
@@ -1761,15 +1754,15 @@ function spawnWave() {
       pending--;
       if (state === 'gameover') return;
       const side = Math.floor(Math.random() * 4), m = 85;
-      const px = player ? player.x : WW / 2, py = player ? player.y : WH / 2;
+      const px = player ? player.x : currentWW / 2, py = player ? player.y : currentWH / 2;
       let sx, sy;
       if (side === 0) { sx = px - W / 2 + Math.random() * W; sy = py - H / 2 - m; }
       else if (side === 1) { sx = px + W / 2 + m; sy = py - H / 2 + Math.random() * H; }
       else if (side === 2) { sx = px - W / 2 + Math.random() * W; sy = py + H / 2 + m; }
       else { sx = px - W / 2 - m; sy = py - H / 2 + Math.random() * H; }
-      sx = Math.max(30, Math.min(WW - 30, sx)); sy = Math.max(30, Math.min(WH - 30, sy));
+      sx = Math.max(30, Math.min(currentWW - 30, sx)); sy = Math.max(30, Math.min(currentWH - 30, sy));
       const piIdx = waveNum <= 3 ? 0 : waveNum <= 6 ? Math.floor(Math.random() * 3) : Math.floor(Math.random() * SLIME_PAL.length);
-      const rMin = 16, rMax = 18 + waveNum * 6;
+      const rMin = 16, rMax = Math.min(90 + cycleNum * 22, 18 + waveNum * 6 + cycleNum * 14);
       const sl = new Slime(sx, sy, rMin + Math.random() * (rMax - rMin), Math.random() < 0.75 ? piIdx : Math.floor(Math.random() * 3));
       sl.sc = 0; slimes.push(sl);
     }, i * 350);
@@ -1777,97 +1770,41 @@ function spawnWave() {
 }
 
 // ===============================================================
-// CLEAR
+// 無限サイクルシステム（クリアなし・永遠インフレ）
 // ===============================================================
-function triggerClear() {
-  if (stageNum === 1) {
-    // 1  2
-    state = 'stage_clear';
-    clearTimer = 0;
-    player.jesusT = 0;
-  } else {
-    // 2  
-    state = 'jesus_clear';
-    clearTimer = 0;
-    player.jesusT = 999;
-  }
-}
-function drawStageClear() {
-  clearTimer += 1/60;
-  const phase = Math.min(1, clearTimer / 2);
-  const textPhase = Math.max(0, Math.min(1, (clearTimer - 0.8) / 1.2));
-  ctx.fillStyle = `rgba(0,0,20,${phase * 0.82})`; ctx.fillRect(0,0,W,H);
-  // 
-  if(phase > 0.2){
-    const fg = ctx.createRadialGradient(W/2,H/2,0.01,W/2,H/2,Math.min(W,H)*0.7);
-    fg.addColorStop(0,`rgba(255,80,0,${(phase-0.2)/0.8*0.2})`);
-    fg.addColorStop(1,'rgba(0,0,0,0)');
-    ctx.fillStyle=fg; ctx.fillRect(0,0,W,H);
-  }
-  if(textPhase > 0){
-    ctx.save(); ctx.textAlign='center'; ctx.globalAlpha=textPhase;
-    ctx.shadowColor='#ff6600'; ctx.shadowBlur=30;
-    ctx.fillStyle='#ff8844'; ctx.font=`bold ${22+Math.sin(gTime*3)*2}px serif`;
-    ctx.fillText('[FIRE] STAGE 1 CLEAR [FIRE]', W/2, H/2-55);
-    ctx.shadowBlur=0; ctx.fillStyle='#ffcc88'; ctx.font='13px monospace';
-    ctx.fillText('サタンスライムを倒した！', W/2, H/2-22);
-    ctx.fillStyle='#ffffff'; ctx.font='12px monospace';
-    ctx.fillText(`Score: ${score}`, W/2, H/2+8);
-    ctx.fillText(`Wave: ${waveNum}  Level: ${player?player.level:1}`, W/2, H/2+28);
-    ctx.shadowColor='#ffaa00'; ctx.shadowBlur=12;
-    ctx.fillStyle='#ffdd44'; ctx.font='bold 13px monospace';
-    ctx.fillText('> STAGE 2 へ続く...', W/2, H/2+58);
-    // 52
-    if(clearTimer > 5){
-      startStage2();
-    }
-    ctx.restore();
-  }
-}
-function startStage2() {
-  stageNum = 2;
-  // 
-  slimes = []; xpOrbs = []; particles = []; magicParts = [];
-  slimeBullets = []; bosses = []; satan = null; satanWarningT = 0;
-  bossKills = 6; // 6  
-  waveNum = Math.max(waveNum, 15); // 
-  clearTimer = 0; wavePending = false;
-  // HP
-  placeWorldObjects(true);
-  state = 'play';
-  spawnWave();
-  bossAnnounce = { name: 'STAGE 2 開始 - さらに強き闇が蘇る', t: 5 };
-}
+function startNextCycle() {
+  cycleNum++;
+  // ワールドを拡張
+  currentWW = 2400 + cycleNum * 800;
+  currentWH = 2400 + cycleNum * 800;
 
-function drawClear() {
-  clearTimer += 1 / 60;
-  const phase = Math.min(1, clearTimer / 2.5);
-  const textPhase = Math.max(0, Math.min(1, (clearTimer - 1.2) / 1.5));
-  // 
-  ctx.fillStyle = `rgba(0,0,0,${phase * 0.55})`; ctx.fillRect(0, 0, W, H);
-  // 
-  if (phase > 0.3) {
-    const gp = (phase - 0.3) / 0.7;
-    const cg = ctx.createRadialGradient(W/2, H/2, 0.01, W/2, H/2, Math.min(W,H)*0.6);
-    cg.addColorStop(0, `rgba(220,160,255,${gp*0.18})`);
-    cg.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = cg; ctx.fillRect(0, 0, W, H);
+  // 派手な演出
+  score += 15000;
+  for (let i = 0; i < 40; i++) {
+    const a = Math.random() * Math.PI * 2, s = 60 + Math.random() * 160;
+    particles.push({ x: player.x, y: player.y, vx: Math.cos(a)*s, vy: Math.sin(a)*s - 30, r: 5 + Math.random()*8, c: ['#ffcc00','#ff4400','#ff00cc','#00ffcc','#ffffff'][Math.floor(Math.random()*5)], life: 1.2 + Math.random(), ml: 2 });
   }
-  // 
-  if (textPhase > 0) {
-    ctx.save(); ctx.textAlign = "center"; ctx.globalAlpha = textPhase;
-    ctx.shadowColor = "#dd99ff"; ctx.shadowBlur = 28;
-    ctx.fillStyle = "#ffffff"; ctx.font = `bold ${28 + Math.sin(gTime * 2) * 2}px serif`;
-    ctx.fillText("[STAR] STAGE 2 CLEAR [STAR]", W/2, H/2 - 44);
-    ctx.shadowBlur = 0; ctx.font = "14px monospace";
-    ctx.fillText(`Score: ${score}`, W/2, H/2 - 4);
-    ctx.fillText(`Wave: ${waveNum}  Level: ${player ? player.level : 1}`, W/2, H/2 + 22);
-    ctx.font = "12px monospace"; ctx.fillStyle = PAL.xp;
-    ctx.fillStyle='#ffdd44'; ctx.font='bold 11px monospace';
-    ctx.fillText(`STAGE ${stageNum} TOTAL SCORE: ${score}`, W/2, H/2+48);
-    if (Math.sin(gTime * 3) > 0) { ctx.fillStyle=PAL.xp; ctx.font='12px monospace'; ctx.fillText("タップしてリトライ", W/2, H/2 + 70); }
-    ctx.restore();
-  }
+
+  // フィールドリセット（プレイヤーのステータスは維持）
+  slimes = []; slimeBullets = []; bosses = []; satan = null; satanWarningT = 0;
+  xpOrbs = []; particles = particles.slice(-20); magicParts = [];
+  bossKills = 0;
+  wavePending = false;
+  state = 'play';
+
+  // 新しいワールドに祠＆アイテムを配置
+  placeWorldObjects();
+
+  // アナウンス
+  bossAnnounce = { name: `★ CYCLE ${cycleNum + 1} 突入！ 世界が膨張する ★`, t: 6 };
+
+  // プレイヤーを新ワールド中心付近に移動
+  player.x = currentWW / 2 + (Math.random() - 0.5) * 200;
+  player.y = currentWH / 2 + (Math.random() - 0.5) * 200;
+  cam.x = currentWW / 2 - W / 2;
+  cam.y = currentWH / 2 - H / 2;
+
+  spawnWave();
 }
 
 // ===============================================================
@@ -1875,14 +1812,14 @@ function drawClear() {
 // ===============================================================
 function placeWorldObjects(stage2 = false) {
   shrines = [];
-  const cx2 = WW / 2, cy2 = WH / 2, sr = Math.min(WW, WH) * 0.36;
+  const cx2 = currentWW / 2, cy2 = currentWH / 2, sr = Math.min(currentWW, currentWH) * 0.36;
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2 - Math.PI / 2;
     const sh = new Shrine(cx2 + Math.cos(a) * sr, cy2 + Math.sin(a) * sr, i);
-    if (stage2) { sh.hp = 500; sh.maxHp = 500; } // 2
+    sh.hp = 300 + cycleNum * 150; sh.maxHp = sh.hp;
     shrines.push(sh);
   }
-  // 
+  // アイテム配置
   items = [];
   const itemDefs = [
     { type: 'chest', positions: [[0.15, 0.12], [0.85, 0.15], [0.50, 0.07], [0.08, 0.50], [0.92, 0.48], [0.22, 0.85], [0.78, 0.82], [0.50, 0.93]] },
@@ -1892,7 +1829,7 @@ function placeWorldObjects(stage2 = false) {
   ];
   for (const def of itemDefs) {
     for (const [rx, ry] of def.positions) {
-      items.push(new Item(rx * WW, ry * WH, def.type));
+      items.push(new Item(rx * currentWW, ry * currentWH, def.type));
     }
   }
 }
@@ -1901,8 +1838,10 @@ function initGame() {
   player = new Player();
   slimes = []; xpOrbs = []; particles = []; magicParts = []; slimeBullets = []; bosses = []; bossKills = 0; satan = null; satanWarningT = 0;
   waveNum = 1; score = 0; gTime = 0; stageNum = 1; screenShake={x:0,y:0,t:0};
+  cycleNum = 0; currentWW = 2400; currentWH = 2400;
+  cam.zoom = 1.0; cam.targetZoom = 1.0;
   state = 'play'; wavePending = false; clearTimer = 0;
-  cam.x = WW / 2 - W / 2; cam.y = WH / 2 - H / 2;
+  cam.x = currentWW / 2 - W / 2; cam.y = currentWH / 2 - H / 2;
   joy.on = false; joy.dx = 0; joy.dy = 0;
   screenShake = {x:0,y:0,t:0};
   placeWorldObjects();
@@ -1918,6 +1857,8 @@ function initTitle() {
     sl.sc = 1; sl.sqStr = 1; sl.sqSq = 1;
     titleSlimes.push(sl);
   }
+  // タイトル用にcamをリセット
+  cam.zoom = 1.0; cam.targetZoom = 1.0;
 }
 
 // ===============================================================
@@ -1995,12 +1936,12 @@ function loop(ts) {
       sl.y += Math.cos(gTime * 0.38 + sl.id * 1.4) * 0.42;
       sl.eyeA = Math.atan2(H / 2 - sl.y, W / 2 - sl.x);
     }
-    cam.x = 0; cam.y = 0;
+    cam.x = 0; cam.y = 0; cam.zoom = 1.0;
     drawTitle(); return;
   }
 
   if (state === 'gameover') {
-    cam.x = 0; cam.y = 0;
+    cam.x = 0; cam.y = 0; cam.zoom = 1.0;
     ctx.fillStyle = PAL.bg; ctx.fillRect(0, 0, W, H);
     drawGameOver(); return;
   }
@@ -2028,18 +1969,14 @@ function loop(ts) {
     updParticles(dt);
     camUpdate();
   }
-  if (state === 'jesus_clear' || state === 'stage_clear') {
-    player.update(dt);
-    for (const sl of slimes) if (!sl.dead) sl.update(dt);
-    slimes = slimes.filter(s => !s.dead);
-    for (let i = xpOrbs.length - 1; i >= 0; i--) { xpOrbs[i].update(dt); if (xpOrbs[i].life <= 0) xpOrbs.splice(i, 1); }
-    updParticles(dt); camUpdate();
-    if (clearTimer > 5 && (state !== 'jesus_clear')) { /* wait */ }
-  }
 
   // -- DRAW ----------------------------------------------------
   if(screenShake.t>0){screenShake.t-=dt;const d=screenShake.t/0.08;screenShake.x=(Math.random()-0.5)*3*d;screenShake.y=(Math.random()-0.5)*3*d;}else{screenShake.x=0;screenShake.y=0;}
-  ctx.save(); ctx.translate(-cam.x+screenShake.x, -cam.y+screenShake.y);
+  // ズームを加味したカメラ変換（プレイヤー中心）
+  ctx.save();
+  ctx.translate(W/2 + screenShake.x, H/2 + screenShake.y);
+  ctx.scale(cam.zoom, cam.zoom);
+  ctx.translate(-cam.x - W/(2*cam.zoom), -cam.y - H/(2*cam.zoom));
   drawBg();
   // 
   for (const it of items) it.draw();
@@ -2055,10 +1992,12 @@ function loop(ts) {
   // 古いベジェ描画は不要になったためコメントアウト（機能維持のため関数は残します）
   // drawNecks(gTime);
   
-  // 1. オフスクリーンをクリアし、カメラ位置を合わせる
+  // 1. オフスクリーンをクリアし、カメラ位置を合わせる（ズーム対応）
   sCtx.clearRect(0, 0, W, H);
   sCtx.save();
-  sCtx.translate(-cam.x + screenShake.x, -cam.y + screenShake.y);
+  sCtx.translate(W/2, H/2);
+  sCtx.scale(cam.zoom, cam.zoom);
+  sCtx.translate(-cam.x - W/(2*cam.zoom), -cam.y - H/(2*cam.zoom));
 
   // 2. スライムの「下地（色部分）」だけをオフスクリーンに描画
   for (const sl of slimes) sl.draw(gTime, sCtx, 1);
@@ -2080,11 +2019,9 @@ function loop(ts) {
   ctx.restore();
 
   // 
-  if (state === 'play' || state === 'jesus' || state === 'jesus_clear') drawHUD();
+  if (state === 'play' || state === 'jesus') drawHUD();
   if (state === 'levelup') { drawHUD(); drawLevelUp(); }
   if (state === 'boss_warning') drawBossWarning();
-  if (state === 'jesus_clear') drawClear();
-  if (state === 'stage_clear') drawStageClear();
 }
 
 // ===============================================================
