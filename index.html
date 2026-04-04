@@ -57,17 +57,10 @@ const WW = 2400, WH = 2400;
 const cam = { x: 0, y: 0, zoom: 1.0, targetZoom: 1.0 };
 function camUpdate() {
   if (!player) return;
-  // 敵の最大サイズと剣の到達距離を基準にズームを計算
-  let maxR = 40 + cycleNum * 15;
-  for (const sl of slimes) if (!sl.dead) maxR = Math.max(maxR, sl.radius * sl.sc);
-  for (const b of bosses) if (!b.dead) maxR = Math.max(maxR, b.radius * b.sc);
-  if (satan && !satan.dead) maxR = Math.max(maxR, satan.radius * satan.sc);
-  const swordReach = 32 + (player ? player.sLen : 42);
-  const refSize = Math.max(maxR, swordReach * 0.55);
-  // refSizeが大きいほどズームアウト、サイクルが増えるほど遠い
-  cam.targetZoom = Math.max(0.14, Math.min(1.0, 58 / refSize * Math.pow(0.80, cycleNum)));
+  // 剣の到達距離だけを基準にズームを計算（上限なし）
+  const swordReach = 32 + player.sLen; // グリップ + 刃の長さ
+  cam.targetZoom = Math.max(0.08, 80 / swordReach);
   cam.zoom += (cam.targetZoom - cam.zoom) * 0.025;
-  // カメラ位置（ズーム考慮した可視範囲の左上）
   const vw = W / cam.zoom, vh = H / cam.zoom;
   cam.x = Math.max(0, Math.min(currentWW - vw, player.x - vw / 2));
   cam.y = Math.max(0, Math.min(currentWH - vh, player.y - vh / 2));
@@ -457,13 +450,6 @@ class Slime {
     }
 
     if (this.flashT <= 0 && sr > 9) this.drawEyes(sr, tCtx);
-
-    if (this.hp < this.maxHp && sr > 12) {
-      const bw = sr * 1.6, bh = 3;
-      const bx = this.x - bw / 2, by = this.y - sr * 1.35 - 6;
-      tCtx.fillStyle = PAL.hpBg; tCtx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
-      tCtx.fillStyle = PAL.hp; tCtx.fillRect(bx, by, bw * (this.hp / this.maxHp), bh);
-    }
   }
 
   drawEyes(sr, tCtx = ctx) {
@@ -1177,6 +1163,7 @@ class Boss {
       am:0.08+Math.random()*0.16,
     });
     this.sqAng=0; this.sqStr=1; this.sqSq=1;
+    this.shx=0; this.shy=0;
     this.blinkPh='wait'; this.blinkT=1.5+Math.random()*2;
   }
   blobPts(t) {
@@ -1324,16 +1311,6 @@ class Boss {
         if(!blink){const po=er*.22;ctx.fillStyle='#180818';ctx.beginPath();ctx.arc(e.x+Math.cos(this.eyeA)*po,e.y+Math.sin(this.eyeA)*po,er*.6,0,Math.PI*2);ctx.fill();}
       }
     }
-    // HP
-    const bw=sr*2.2,bh=6,bx=this.x-bw/2,by=this.y-sr*1.5-10;
-    ctx.fillStyle='#1a0010'; ctx.fillRect(bx-1,by-1,bw+2,bh+2);
-    ctx.fillStyle=this.def.color; ctx.fillRect(bx,by,bw*(this.hp/this.maxHp),bh);
-    ctx.strokeStyle=this.def.halo; ctx.lineWidth=1; ctx.strokeRect(bx-1,by-1,bw+2,bh+2);
-    // 
-    ctx.save(); ctx.textAlign='center'; ctx.font=`bold 10px monospace`;
-    ctx.fillStyle=this.def.halo; ctx.shadowColor=this.def.color; ctx.shadowBlur=8;
-    ctx.fillText(this.displayName,this.x,by-5);
-    ctx.restore();
   }
 }
 
@@ -1500,18 +1477,6 @@ class SatanSlime {
         if(!blink){ctx.fillStyle='#200000';ctx.beginPath();const po=er*.2;ctx.arc(e.x+Math.cos(this.eyeA)*po,e.y+Math.sin(this.eyeA)*po,er*.55,0,Math.PI*2);ctx.fill();}
       }
     }
-    // HP
-    const bw=sr*2.5,bh=8,bx=this.x-bw/2,by2=this.y-sr*1.45-14;
-    ctx.fillStyle='#200000'; ctx.fillRect(bx-1,by2-1,bw+2,bh+2);
-    const hr=this.hp/this.maxHp;
-    const hc=hr>0.6?'#cc2244':hr>0.3?'#ff4400':'#ff0000';
-    ctx.fillStyle=hc; ctx.fillRect(bx,by2,bw*hr,bh);
-    ctx.strokeStyle='#ff3300'; ctx.lineWidth=1.5; ctx.strokeRect(bx-1,by2-1,bw+2,bh+2);
-    // 
-    ctx.save(); ctx.textAlign='center'; ctx.font='bold 13px serif';
-    ctx.fillStyle='#ff4444'; ctx.shadowColor='#cc0000'; ctx.shadowBlur=12;
-    ctx.fillText('[FIRE] サタンスライム [FIRE]',this.x,by2-7);
-    ctx.restore();
   }
 }
 
@@ -1603,8 +1568,113 @@ function drawBg() {
 }
 
 // ===============================================================
-// HUD
+// SCREEN-SPACE HP BARS（ズームに左右されない固定サイズ）
 // ===============================================================
+function worldToScreen(wx, wy) {
+  return {
+    x: (wx - cam.x) * cam.zoom,
+    y: (wy - cam.y) * cam.zoom,
+  };
+}
+
+function drawAllHPBars() {
+  ctx.save();
+
+  // --- 通常スライム ---
+  for (const sl of slimes) {
+    if (sl.dead || sl.sc < 0.5 || sl.hp >= sl.maxHp) continue;
+    const sc = worldToScreen(sl.x, sl.y);
+    const sr = sl.radius * sl.sc;
+    // 画面内チェック
+    if (sc.x < -80 || sc.x > W + 80 || sc.y < -80 || sc.y > H + 80) continue;
+
+    const topY = sc.y - sr * cam.zoom - 10;
+    const bw = Math.max(28, Math.min(60, sr * cam.zoom * 1.6));
+    const bh = 4;
+    const bx = sc.x - bw / 2;
+    const by = topY - bh;
+
+    ctx.fillStyle = '#1a0008';
+    ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
+    const ratio = Math.max(0, sl.hp / sl.maxHp);
+    const hpColor = ratio > 0.5 ? '#ff3040' : ratio > 0.25 ? '#ff7700' : '#ff0000';
+    ctx.fillStyle = hpColor;
+    ctx.fillRect(bx, by, bw * ratio, bh);
+    ctx.strokeStyle = '#ff6070';
+    ctx.lineWidth = 0.8;
+    ctx.strokeRect(bx - 1, by - 1, bw + 2, bh + 2);
+  }
+
+  // --- 通常ボス ---
+  for (const b of bosses) {
+    if (b.dead || b.sc < 0.3) continue;
+    const sc = worldToScreen(b.x, b.y);
+    if (sc.x < -200 || sc.x > W + 200 || sc.y < -200 || sc.y > H + 200) continue;
+
+    const sr = b.radius * b.sc;
+    const topY = sc.y - sr * cam.zoom - 14;
+    const bw = Math.min(160, Math.max(80, sr * cam.zoom * 2.2));
+    const bh = 7;
+    const bx = sc.x - bw / 2;
+    const by = topY - bh;
+
+    // 背景
+    ctx.fillStyle = '#1a0010';
+    ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
+    // バー
+    const ratio = Math.max(0, b.hp / b.maxHp);
+    ctx.fillStyle = b.def.color;
+    ctx.fillRect(bx, by, bw * ratio, bh);
+    // 枠
+    ctx.strokeStyle = b.def.halo;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx - 1, by - 1, bw + 2, bh + 2);
+    // 名前
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 10px monospace';
+    ctx.fillStyle = b.def.halo;
+    ctx.shadowColor = b.def.color;
+    ctx.shadowBlur = 8;
+    ctx.fillText(b.displayName, sc.x, by - 4);
+    ctx.shadowBlur = 0;
+  }
+
+  // --- サタンスライム ---
+  if (satan && !satan.dead && satan.sc > 0.3) {
+    const sc = worldToScreen(satan.x, satan.y);
+    if (sc.x >= -300 && sc.x <= W + 300 && sc.y >= -300 && sc.y <= H + 300) {
+      const sr = satan.radius * satan.sc;
+      const topY = sc.y - sr * cam.zoom - 18;
+      const bw = Math.min(220, Math.max(120, sr * cam.zoom * 2.5));
+      const bh = 9;
+      const bx = sc.x - bw / 2;
+      const by = topY - bh;
+
+      ctx.fillStyle = '#200000';
+      ctx.fillRect(bx - 1, by - 1, bw + 2, bh + 2);
+      const hr = Math.max(0, satan.hp / satan.maxHp);
+      const hc = hr > 0.6 ? '#cc2244' : hr > 0.3 ? '#ff4400' : '#ff0000';
+      ctx.fillStyle = hc;
+      ctx.fillRect(bx, by, bw * hr, bh);
+      ctx.strokeStyle = '#ff3300';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(bx - 1, by - 1, bw + 2, bh + 2);
+      // 名前
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 12px serif';
+      ctx.fillStyle = '#ff4444';
+      ctx.shadowColor = '#cc0000';
+      ctx.shadowBlur = 14;
+      ctx.fillText('★ サタンスライム ★', sc.x, by - 5);
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+
 function drawHUD() {
   if (!player) return;
   const bx = 10, by = H - 28, bw = W * 0.5, bh = 13;
@@ -2017,6 +2087,9 @@ function loop(ts) {
   drawParticles();
   if (player) player.draw();
   ctx.restore();
+
+  // ズームに左右されないスクリーン空間HPバー
+  if (state === 'play' || state === 'jesus' || state === 'levelup') drawAllHPBars();
 
   // 
   if (state === 'play' || state === 'jesus') drawHUD();
