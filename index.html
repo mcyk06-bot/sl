@@ -191,28 +191,42 @@ class Slime {
     }
     // &
     this.sqAng = 0; this.sqStr = 1; this.sqSq = 1;
+    // ぷにぷにホップ（スライムらしい上下バウンド）
+    this.bobPh = Math.random() * Math.PI * 2;
+    this.hopOff = 0;
   }
 
   spd() {
-    return 28 + (60 - Math.min(60, this.radius)) * 0.4 + waveNum * 2.2 + cycleNum * 9;
+    return 28 + (60 - Math.min(60, this.radius)) * 0.4 + waveNum * 1.8 + cycleNum * 7;
   }
 
   // 
   blobPts(t) {
     const result = [];
+    const sr = this.radius * this.sc;
+    // ぷにぷにホップ：bob<0=接地で潰れる, bob>0=浮き上がって伸びる
+    const bob = Math.sin(this.bobPh);
+    const hopOff = Math.max(0, bob) * sr * 0.22;
+    this.hopOff = hopOff;
+    const stretchF = bob * 0.16;
     for (let i = 0; i < this.N; i++) {
       const p = this.pts[i];
       const baseA = (i / this.N) * Math.PI * 2 + p.aOff;
-      // 
-      const r = this.radius * this.sc * p.rBase * (1 + Math.sin(t * p.fr + p.ph) * p.am);
+      //
+      const r = sr * p.rBase * (1 + Math.sin(t * p.fr + p.ph) * p.am);
+      let px = Math.cos(baseA) * r, py = Math.sin(baseA) * r;
+      // 被弾時のグニャッとした衝撃歪み（上部ほど大きく揺れる）
+      const weight = Math.max(0, (sr - py) / (sr * 2));
+      px += this.shx * weight;
+      py += this.shy * weight;
       // &
       const ca = Math.cos(this.sqAng), sa = Math.sin(this.sqAng);
-      const px = Math.cos(baseA) * r, py = Math.sin(baseA) * r;
       const along = px * ca + py * sa;
       const perp = -px * sa + py * ca;
+      const str = this.sqStr - stretchF, sq = this.sqSq + stretchF;
       result.push({
-        x: this.x + along * this.sqStr * ca - perp * this.sqSq * sa,
-        y: this.y + along * this.sqStr * sa + perp * this.sqSq * ca,
+        x: this.x + along * str * ca - perp * sq * sa,
+        y: this.y + along * str * sa + perp * sq * ca - hopOff,
       });
     }
     return result;
@@ -282,12 +296,30 @@ class Slime {
     // &
     const mv = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
     const ratio = Math.min(1, mv / (sp || 1));
-    const strT = 1 + ratio * 0.45;
+    const strT = 1 + ratio * 0.6;
     const sqT = 1 / Math.sqrt(strT);
     const angT = Math.atan2(this.vy, this.vx);
-    const k = mv > 5 ? Math.min(1, dt * 12) : Math.min(1, dt * 7);
+    const k = mv > 5 ? Math.min(1, dt * 14) : Math.min(1, dt * 8);
     this.sqStr += (strT - this.sqStr) * k;
     this.sqSq += (sqT - this.sqSq) * k;
+
+    // 被弾の歪み（バネのように元へ戻る）
+    const shDecay = Math.pow(0.04, dt);
+    this.shx *= shDecay; this.shy *= shDecay;
+
+    // ぷにぷにホップ：速く動くほどホップも速くなる
+    const hopFreq = 1.6 + ratio * 3.2;
+    const prevBob = Math.sin(this.bobPh);
+    this.bobPh += dt * hopFreq;
+    const newBob = Math.sin(this.bobPh);
+    if (prevBob < 0 && newBob >= 0 && this.sc > 0.85 && Math.random() < 0.6) {
+      // 着地のプニッと音的な小さい飛沫
+      const sr = this.radius * this.sc;
+      for (let i = 0; i < 3; i++) {
+        const a = Math.random() * Math.PI * 2;
+        particles.push({ x: this.x, y: this.y + sr * 0.7, vx: Math.cos(a) * 14, vy: -6 - Math.random() * 10, r: 1.5 + Math.random() * 2, c: SLIME_PAL[this.pi].h, life: 0.18 + Math.random() * 0.12, ml: 0.4 });
+      }
+    }
     //if (mv > 8) {
     //  let da = angT - this.sqAng;
     //  while (da > Math.PI) da -= Math.PI * 2;
@@ -336,13 +368,13 @@ class Slime {
   }
 
   hit(dmg) {
-    this.hp -= dmg; 
+    this.hp -= dmg;
     this.flashT = 0.08;
-    
+
     // 回転(this.va)への代入を廃止し、歪み(shx, shy)に衝撃を与える
-    // 左右にランダムに揺れつつ、上にグニャッと伸びる
-    this.shx = (Math.random() - 0.5) * 25; 
-    this.shy = -20; 
+    // 左右にランダムに揺れつつ、上にグニャッと伸びる（累積させてプルプル感UP）
+    this.shx = Math.max(-32, Math.min(32, this.shx + (Math.random() - 0.5) * 30));
+    this.shy = Math.max(-28, this.shy - 14);
 
     splat(this.x, this.y - this.radius * 0.3, SLIME_PAL[this.pi].m, 3, 22);
     if (this.hp <= 0) this.die();
@@ -402,10 +434,12 @@ class Slime {
     if (drawMode === 1) return;
 
     // --- 既存の描画ロジック（影、枠線、ハイライト、目など） ---
+    // ホップで浮くほど影は小さく薄くなる（接地時はベタッと広がる）
+    const hopRatio = Math.min(1, this.hopOff / (sr * 0.22 || 1));
     tCtx.save();
     tCtx.fillStyle = 'rgba(0,0,0,0.22)';
     tCtx.beginPath();
-    tCtx.ellipse(this.x + 3, this.y + sr * 0.75, sr * 0.9, sr * 0.28, 0, 0, Math.PI * 2);
+    tCtx.ellipse(this.x + 3, this.y + sr * 0.75, sr * (0.9 - hopRatio * 0.18), sr * (0.28 - hopRatio * 0.1), 0, 0, Math.PI * 2);
     tCtx.fill();
     tCtx.restore();
 
@@ -419,10 +453,11 @@ class Slime {
       tCtx.stroke();
       tCtx.globalAlpha = 1;
 
+      const by = this.y - this.hopOff;
       tCtx.save();
-      tCtx.translate(this.x, this.y);
+      tCtx.translate(this.x, by);
       tCtx.scale(0.62, 0.58);
-      tCtx.translate(-this.x, -this.y + sr * 0.08);
+      tCtx.translate(-this.x, -by + sr * 0.08);
       this.drawPath(pts, tCtx);
       tCtx.fillStyle = pal.h;
       tCtx.globalAlpha = 0.35;
@@ -431,20 +466,20 @@ class Slime {
       tCtx.globalAlpha = 1;
 
       // --- 修正：ネバネバしたテカリ（動くハイライト） ---
-      const shimmerT = t * 0.005; 
-      const ox = Math.sin(shimmerT + this.x * 0.05) * (sr * 0.08); 
-      const oy = Math.cos(shimmerT + this.y * 0.05) * (sr * 0.08); 
+      const shimmerT = t * 0.005;
+      const ox = Math.sin(shimmerT + this.x * 0.05) * (sr * 0.08);
+      const oy = Math.cos(shimmerT + this.y * 0.05) * (sr * 0.08);
 
       tCtx.fillStyle = 'rgba(255,255,255,0.88)';
       tCtx.beginPath();
       // 元の座標計算に ox と oy を加算
-      tCtx.arc(this.x - sr * 0.26 + ox, this.y - sr * 0.30 + oy, sr * 0.10, 0, Math.PI * 2);
+      tCtx.arc(this.x - sr * 0.26 + ox, by - sr * 0.30 + oy, sr * 0.10, 0, Math.PI * 2);
       tCtx.fill();
 
       tCtx.fillStyle = 'rgba(255,255,255,0.42)';
       tCtx.beginPath();
       // こちらも同様に加算（動きを少し抑えるために 0.5倍）
-      tCtx.arc(this.x - sr * 0.08 + ox * 0.5, this.y - sr * 0.44 + oy * 0.5, sr * 0.05, 0, Math.PI * 2);
+      tCtx.arc(this.x - sr * 0.08 + ox * 0.5, by - sr * 0.44 + oy * 0.5, sr * 0.05, 0, Math.PI * 2);
       tCtx.fill();
       // ----------------------------------------------
     }
@@ -455,7 +490,7 @@ class Slime {
   drawEyes(sr, tCtx = ctx) {
     const er = Math.max(2, sr * 0.18), sep = sr * 0.30;
     const fx = this.x + Math.cos(this.eyeA) * sr * 0.34;
-    const fy = this.y + Math.sin(this.eyeA) * sr * 0.34;
+    const fy = this.y + Math.sin(this.eyeA) * sr * 0.34 - this.hopOff;
     const px = Math.cos(this.eyeA + Math.PI / 2) * sep;
     const py = Math.sin(this.eyeA + Math.PI / 2) * sep;
     const eyes = [{ x: fx + px, y: fy + py }, { x: fx - px, y: fy - py }];
@@ -586,7 +621,7 @@ class Player {
     }
     if (this.inv > 0) this.inv -= dt;
     // 3HP0.8%
-    if (!this.isJesus()) this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.008 * dt);
+    if (!this.isJesus()) this.hp = Math.min(this.maxHp, this.hp + this.maxHp * 0.012 * dt);
     if (this.jesusT > 0) {
       this.jesusT -= dt;
       this.inv = 0.5; // 
